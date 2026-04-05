@@ -11,6 +11,9 @@ import {
   detectCyclesHandler,
   findOrphansHandler,
   healthReportHandler,
+  getChangeCouplingHandler,
+  getKnowledgeMapHandler,
+  getChangeRiskHandler,
 } from "./mcp/tools.js";
 
 const repoRoot = process.env.CODE_GRAPH_REPO ?? process.cwd();
@@ -106,6 +109,40 @@ server.tool(
   async () => {
     const report = healthReportHandler(ctx);
     return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+  }
+);
+
+// --- Temporal/Knowledge Tools ---
+
+server.tool(
+  "get_change_coupling",
+  "Find files that frequently change together (temporal coupling from git history)",
+  {},
+  async () => {
+    const result = await getChangeCouplingHandler(ctx);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_knowledge_map",
+  "Get developer ownership map, knowledge silos, and bus factor per community",
+  {},
+  async () => {
+    const result = await getKnowledgeMapHandler(ctx);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_change_risk",
+  "Assess risk score for changing a specific file based on churn, coupling, ownership, and dependencies",
+  {
+    file_path: z.string().describe("File path to assess risk for"),
+  },
+  async ({ file_path }) => {
+    const result = await getChangeRiskHandler(ctx, file_path);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
 

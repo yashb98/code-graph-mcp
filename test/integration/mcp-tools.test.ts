@@ -9,6 +9,9 @@ import {
   detectCyclesHandler,
   findOrphansHandler,
   healthReportHandler,
+  getChangeCouplingHandler,
+  getKnowledgeMapHandler,
+  getChangeRiskHandler,
 } from "../../src/mcp/tools.js";
 import { join } from "path";
 
@@ -87,5 +90,50 @@ describe("MCP Tools Integration", () => {
 
     const dependents = queryDependents(ctx, "nonexistent.ts");
     expect(dependents.dependents).toEqual([]);
+  });
+});
+
+// Temporal/knowledge tests run against the actual repo (which has git history)
+const REPO_ROOT = join(import.meta.dir, "../..");
+
+describe("Temporal/Knowledge MCP Tools", () => {
+  const config = loadConfig(REPO_ROOT);
+  config.include = ["src/**/*.ts"];
+  config.exclude = [];
+  const ctx = createToolContext(config, REPO_ROOT);
+
+  beforeAll(async () => {
+    await buildGraph(ctx);
+  });
+
+  test("get_change_coupling returns coupling data", async () => {
+    const result = await getChangeCouplingHandler(ctx);
+    expect(result).toBeDefined();
+    expect(result.lookbackDays).toBeDefined();
+    expect(Array.isArray(result.coChanges)).toBe(true);
+  });
+
+  test("get_knowledge_map returns ownership data", async () => {
+    const result = await getKnowledgeMapHandler(ctx);
+    expect(result).toBeDefined();
+    expect(result.totalFiles).toBeGreaterThan(0);
+    expect(result.analyzedFiles).toBeGreaterThanOrEqual(0);
+    expect(typeof result.siloCount).toBe("number");
+  });
+
+  test("get_change_risk returns risk assessment", async () => {
+    const result = await getChangeRiskHandler(ctx, "src/index.ts");
+    expect(result).toBeDefined();
+    expect(result.filePath).toBe("src/index.ts");
+    expect(result.riskScore).toBeGreaterThanOrEqual(0);
+    expect(result.riskScore).toBeLessThanOrEqual(100);
+    expect(["low", "medium", "high"]).toContain(result.risk);
+    expect(result.signals).toBeDefined();
+  });
+
+  test("get_change_risk handles nonexistent file", async () => {
+    const result = await getChangeRiskHandler(ctx, "nonexistent.ts");
+    expect(result).toBeDefined();
+    expect(result.filePath).toBe("nonexistent.ts");
   });
 });

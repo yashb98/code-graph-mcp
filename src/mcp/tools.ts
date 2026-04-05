@@ -3,6 +3,9 @@ import { GraphStore } from "../graph/graph-store.js";
 import { findCycles, findOrphans, findHubNodes, findBridgeNodes, getConnectedComponents } from "../graph/analysis.js";
 import { detectCommunities, assignCommunities } from "../graph/community.js";
 import { computeHealthReport } from "../graph/health.js";
+import { GitAnalyzer } from "../temporal/git-analyzer.js";
+import { computeOwnership } from "../knowledge/ownership.js";
+import { computeBusFactor } from "../knowledge/bus-factor.js";
 import type { CodeGraphConfig } from "../types.js";
 
 export interface ToolContext {
@@ -170,4 +173,125 @@ export function healthReportHandler(ctx: ToolContext) {
     maxCallChainDepth: ctx.config.maxCallChainDepth,
     hubDegreeMultiplier: ctx.config.hubDegreeMultiplier,
   });
+}
+
+// --- Temporal/Knowledge Handlers ---
+
+export async function getChangeCouplingHandler(ctx: ToolContext) {
+  const analyzer = new GitAnalyzer(ctx.repoRoot);
+  if (!(await analyzer.isGitRepo())) {
+    return { error: "Not a git repository", coChanges: [] };
+  }
+
+  const coChanges = await analyzer.getCoChanges(
+    ctx.config.temporal.lookbackDays,
+    1, // low threshold to return more results
+  );
+
+  return { coChanges, lookbackDays: ctx.config.temporal.lookbackDays };
+}
+
+export async function getKnowledgeMapHandler(ctx: ToolContext) {
+  const analyzer = new GitAnalyzer(ctx.repoRoot);
+  if (!(await analyzer.isGitRepo())) {
+    return { error: "Not a git repository", files: [] };
+  }
+
+  const files = ctx.store.getFileNodes();
+  const ownershipResults = [];
+
+  for (const filePath of files) {
+    const authorData = await analyzer.getFileAuthors(filePath);
+    if (authorData) {
+      const ownership = computeOwnership(authorData, ctx.config.knowledge.siloThreshold);
+      ownershipResults.push(ownership);
+    }
+  }
+
+  // Compute bus factors per community
+  const communities = detectCommunities(ctx.store);
+  const communityFiles = new Map<number, typeof ownershipResults>();
+  for (const ownership of ownershipResults) {
+    const communityId = communities.communities[ownership.filePath];
+    if (communityId !== undefined) {
+      const files = communityFiles.get(communityId) ?? [];
+      files.push(ownership);
+      communityFiles.set(communityId, files);
+    }
+  }
+
+  const busFactors = [];
+  for (const [communityId, files] of communityFiles) {
+    busFactors.push(computeBusFactor(communityId, files, ctx.config.knowledge.minBusFactor));
+  }
+
+  const silos = ownershipResults.filter((o) => o.isSilo);
+
+  return {
+    totalFiles: files.length,
+    analyzedFiles: ownershipResults.length,
+    siloCount: silos.length,
+    silos: silos.map((s) => ({ file: s.filePath, author: s.primaryAuthor, score: s.knowledgeScore })),
+    busFactors,
+  };
+}
+
+export async function getChangeRiskHandler(ctx: ToolContext, filePath: string) {
+  const analyzer = new GitAnalyzer(ctx.repoRoot);
+  if (!(await analyzer.isGitRepo())) {
+    return { error: "Not a git repository", filePath, risk: "unknown" };
+  }
+
+  // Gather risk signals
+  const churn = await analyzer.getFileChurn(ctx.config.temporal.lookbackDays);
+  const fileChurn = churn.find((c) => c.filePath === filePath);
+  const coChanges = await analyzer.getCoChanges(ctx.config.temporal.lookbackDays, 1);
+  const fileCoupling = coChanges.filter((c) => c.fileA === filePath || c.fileB === filePath);
+
+  const dependents = ctx.store.getDependents(filePath);
+  const dependencies = ctx.store.getDependencies(filePath);
+
+  const authorData = await analyzer.getFileAuthors(filePath);
+  const ownership = authorData ? computeOwnership(authorData, ctx.config.knowledge.siloThreshold) : null;
+
+  // Compute risk score (0-100)
+  let riskScore = 0;
+
+  // High churn = higher risk
+  if (fileChurn) {
+    const maxChurn = Math.max(...churn.map((c) => c.commits));
+    riskScore += (fileChurn.commits / maxChurn) * 25;
+  }
+
+  // Many dependents = higher blast radius
+  riskScore += Math.min(dependents.length * 3, 25);
+
+  // High coupling = changes ripple
+  riskScore += Math.min(fileCoupling.length * 5, 25);
+
+  // Knowledge silo = risky
+  if (ownership?.isSilo) riskScore += 15;
+  if (ownership && ownership.authorCount === 1) riskScore += 10;
+
+  riskScore = Math.min(100, Math.round(riskScore));
+
+  const risk = riskScore >= 70 ? "high" : riskScore >= 40 ? "medium" : "low";
+
+  return {
+    filePath,
+    riskScore,
+    risk,
+    signals: {
+      churn: fileChurn ?? null,
+      dependentCount: dependents.length,
+      dependencyCount: dependencies.length,
+      coupledFiles: fileCoupling.length,
+      ownership: ownership ? {
+        primaryAuthor: ownership.primaryAuthor,
+        authorCount: ownership.authorCount,
+        isSilo: ownership.isSilo,
+        knowledgeScore: ownership.knowledgeScore,
+      } : null,
+    },
+  };
 }
