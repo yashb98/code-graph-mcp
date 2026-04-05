@@ -3,6 +3,7 @@ import { GraphStore } from "../graph/graph-store.js";
 import { findCycles, findOrphans, findHubNodes, findBridgeNodes, getConnectedComponents } from "../graph/analysis.js";
 import { detectCommunities, assignCommunities } from "../graph/community.js";
 import { computeHealthReport } from "../graph/health.js";
+import { checkRules } from "../graph/rules.js";
 import { GitAnalyzer } from "../temporal/git-analyzer.js";
 import { computeOwnership } from "../knowledge/ownership.js";
 import { computeBusFactor } from "../knowledge/bus-factor.js";
@@ -173,6 +174,10 @@ export function healthReportHandler(ctx: ToolContext) {
     maxCallChainDepth: ctx.config.maxCallChainDepth,
     hubDegreeMultiplier: ctx.config.hubDegreeMultiplier,
   });
+}
+
+export function checkArchitectureRulesHandler(ctx: ToolContext) {
+  return checkRules(ctx.store, ctx.config.architectureRules);
 }
 
 // --- Temporal/Knowledge Handlers ---

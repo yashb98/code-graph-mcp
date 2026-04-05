@@ -14,6 +14,7 @@ import {
   getChangeCouplingHandler,
   getKnowledgeMapHandler,
   getChangeRiskHandler,
+  checkArchitectureRulesHandler,
 } from "./mcp/tools.js";
 
 const repoRoot = process.env.CODE_GRAPH_REPO ?? process.cwd();
@@ -109,6 +110,16 @@ server.tool(
   async () => {
     const report = healthReportHandler(ctx);
     return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+  }
+);
+
+server.tool(
+  "check_architecture_rules",
+  "Check architecture rules defined in codegraph.config.json — dependency, layer, and boundary rules",
+  {},
+  async () => {
+    const violations = checkArchitectureRulesHandler(ctx);
+    return { content: [{ type: "text", text: JSON.stringify(violations, null, 2) }] };
   }
 );
 
