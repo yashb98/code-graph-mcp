@@ -17,6 +17,7 @@ import {
   getKnowledgeMapHandler,
   getChangeRiskHandler,
   checkArchitectureRulesHandler,
+  searchSymbolsHandler,
 } from "./mcp/tools.js";
 
 const repoRoot = process.env.CODE_GRAPH_REPO ?? process.cwd();
@@ -126,6 +127,20 @@ server.tool(
   async () => {
     const violations = checkArchitectureRulesHandler(ctx);
     return { content: [{ type: "text", text: JSON.stringify(violations, null, 2) }] };
+  }
+);
+
+server.tool(
+  "search_symbols",
+  "Search for functions, classes, and types by name or meaning. Use embeddings=true for semantic search (slower first time, downloads model).",
+  {
+    query: z.string().describe("Search query (name, keyword, or natural language description)"),
+    top_k: z.number().optional().default(10).describe("Number of results to return"),
+    use_embeddings: z.boolean().optional().default(false).describe("Use ML embeddings for semantic search (slower but finds conceptual matches)"),
+  },
+  async ({ query, top_k, use_embeddings }) => {
+    const results = await searchSymbolsHandler(ctx, query, top_k, use_embeddings);
+    return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
   }
 );
 

@@ -4,6 +4,7 @@ import { findCycles, findOrphans, findHubNodes, findBridgeNodes, getConnectedCom
 import { detectCommunities, assignCommunities } from "../graph/community.js";
 import { computeHealthReport } from "../graph/health.js";
 import { checkRules } from "../graph/rules.js";
+import { SemanticIndex } from "../search/semantic.js";
 import { GitAnalyzer } from "../temporal/git-analyzer.js";
 import { computeOwnership } from "../knowledge/ownership.js";
 import { computeBusFactor } from "../knowledge/bus-factor.js";
@@ -14,6 +15,7 @@ export interface ToolContext {
   config: CodeGraphConfig;
   repoRoot: string;
   lastBuild: BuildResult | null;
+  semanticIndex: SemanticIndex;
 }
 
 export function createToolContext(config: CodeGraphConfig, repoRoot: string): ToolContext {
@@ -22,6 +24,7 @@ export function createToolContext(config: CodeGraphConfig, repoRoot: string): To
     config,
     repoRoot,
     lastBuild: null,
+    semanticIndex: new SemanticIndex(config.embeddingModel),
   };
 }
 
@@ -178,6 +181,18 @@ export function healthReportHandler(ctx: ToolContext) {
 
 export function checkArchitectureRulesHandler(ctx: ToolContext) {
   return checkRules(ctx.store, ctx.config.architectureRules);
+}
+
+export async function searchSymbolsHandler(ctx: ToolContext, query: string, topK: number = 10, useEmbeddings: boolean = false) {
+  if (useEmbeddings) {
+    if (!ctx.semanticIndex.isReady()) {
+      await ctx.semanticIndex.init();
+      await ctx.semanticIndex.indexGraph(ctx.store);
+    }
+    return ctx.semanticIndex.search(query, topK);
+  }
+  // Fast text-based fallback
+  return ctx.semanticIndex.textSearch(ctx.store, query, topK);
 }
 
 // --- Temporal/Knowledge Handlers ---
