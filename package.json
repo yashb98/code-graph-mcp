@@ -1,0 +1,29 @@
+{
+  "name": "code-graph-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "oxc-parser": "^0.123.0",
+    "typescript": "~5.7.0",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-components": "^1.5.4",
+    "graphology-traversal": "^0.3.1",
+    "kuzu": "^0.11.3",
+    "@huggingface/transformers": "^4.0.1",
+    "simple-git": "^3.33.0",
+    "xxhash-wasm": "^1.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
