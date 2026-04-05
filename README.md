@@ -1,0 +1,101 @@
+# code-graph-mcp
+
+Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built with OXC parser, graphology, and the MCP SDK.
+
+## Features
+
+- **Structural graph** — OXC-powered parsing of imports, exports, symbols, JSX
+- **Community detection** — Louvain algorithm for module clustering
+- **Cycle detection** — Tarjan's SCC algorithm
+- **Health scoring** — 8-category scoring (0-100) with letter grades
+- **Temporal analysis** — Git churn, co-change coupling, bug fix detection
+- **Knowledge mapping** — Ownership, bus factor, knowledge silos
+- **Architecture rules** — Dependency, layer, and boundary enforcement
+- **Merkle indexing** — xxhash-based incremental rebuilds
+- **MCP resources** — Live graph overview and health endpoints
+- **MCP prompts** — Code review, architecture review, onboarding templates
+
+## 12 MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `build_graph` | Parse all TS/TSX files and build the knowledge graph |
+| `get_stats` | Node/edge/file/symbol/community counts |
+| `query_dependencies` | Forward dependencies with transitive traversal |
+| `query_dependents` | Reverse dependencies (impact radius) |
+| `detect_cycles` | Circular dependency detection |
+| `find_orphans` | Orphan files, unused functions, zombie exports |
+| `health_report` | 8-category health scoring with letter grade |
+| `check_architecture_rules` | Validate architecture rules from config |
+| `get_change_coupling` | Files that frequently co-change |
+| `get_knowledge_map` | Developer ownership, silos, bus factor |
+| `get_change_risk` | Risk scoring for a specific file |
+| `ping` | Health check |
+
+## Quick Start
+
+```bash
+# Install
+bun install
+
+# Run MCP server (stdio transport)
+bun run src/index.ts
+
+# Run tests
+bun test
+
+# Run tests with coverage
+bun test --coverage
+```
+
+## Configuration
+
+Create `codegraph.config.json` in your repo root:
+
+```json
+{
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "**/*.d.ts"],
+  "entryPoints": ["src/index.ts"],
+  "architectureRules": [
+    {
+      "id": "no-ui-to-db",
+      "name": "UI must not access DB",
+      "type": "dependency",
+      "rule": { "source": "src/ui/**", "target": "src/db/**", "allow": false },
+      "severity": "error"
+    }
+  ]
+}
+```
+
+## Claude Code / Cursor Integration
+
+Add to your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "code-graph": {
+      "command": "bun",
+      "args": ["run", "/path/to/code-graph-mcp/src/index.ts"],
+      "env": {
+        "CODE_GRAPH_REPO": "/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+## Stack
+
+- **Runtime**: Bun
+- **Parser**: OXC NAPI (Rust, fastest TS/TSX parser)
+- **Graph**: graphology + Louvain community detection
+- **Git**: simple-git for temporal/knowledge analysis
+- **Hashing**: xxhash-wasm for Merkle indexing
+- **MCP**: @modelcontextprotocol/sdk
+
+## Test Coverage
+
+116 tests | 96.9% line coverage | 97.3% function coverage
