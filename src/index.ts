@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
+import { registerResources } from "./mcp/resources.js";
+import { registerPrompts } from "./mcp/prompts.js";
 import {
   createToolContext,
   buildGraph,
@@ -23,8 +25,12 @@ const ctx = createToolContext(config, repoRoot);
 
 const server = new McpServer(
   { name: "code-graph-mcp", version: "0.1.0" },
-  { capabilities: { logging: {} } }
+  { capabilities: { logging: {}, resources: {}, prompts: {} } }
 );
+
+// Register resources and prompts
+registerResources(server, ctx);
+registerPrompts(server);
 
 // --- Core Tools ---
 
