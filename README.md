@@ -55,6 +55,16 @@ bun test
 bun test --coverage
 ```
 
+## Verbosity
+
+All tools accept an optional `verbosity` parameter to control response size:
+
+| Level | Behavior | Token Savings |
+|-------|----------|---------------|
+| `minimal` | Counts/scores only, arrays truncated to 5 items | ~60-80% |
+| `normal` | Default behavior | baseline |
+| `detailed` | Everything, no truncation | +10-20% |
+
 ## Configuration
 
 Create `codegraph.config.json` in your repo root:
@@ -105,4 +115,4 @@ Add to your MCP settings:
 
 ## Test Coverage
 
-116 tests | 96.9% line coverage | 97.3% function coverage
+173 tests | 95.4% line coverage | 95.7% function coverage
