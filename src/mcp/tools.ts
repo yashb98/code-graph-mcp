@@ -8,7 +8,8 @@ import { SemanticIndex } from "../search/semantic.js";
 import { GitAnalyzer } from "../temporal/git-analyzer.js";
 import { computeOwnership } from "../knowledge/ownership.js";
 import { computeBusFactor } from "../knowledge/bus-factor.js";
-import type { CodeGraphConfig } from "../types.js";
+import type { CodeGraphConfig, Verbosity } from "../types.js";
+import { shapeResponse, truncateList, DEFAULT_VERBOSITY } from "./verbosity.js";
 
 export interface ToolContext {
   store: GraphStore;
@@ -59,32 +60,27 @@ export async function buildGraph(ctx: ToolContext): Promise<{
   };
 }
 
-export function getStats(ctx: ToolContext): {
-  nodeCount: number;
-  edgeCount: number;
-  fileCount: number;
-  symbolCount: number;
-  communities: number;
-  built: boolean;
-} {
+export function getStats(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const stats = ctx.store.getStats();
   const communities = detectCommunities(ctx.store);
-  return {
+  const result = {
     ...stats,
     communities: communities.count,
     built: ctx.lastBuild !== null,
   };
+  return result;
 }
 
-export function queryDependencies(ctx: ToolContext, nodeId: string, depth: number = 1): {
-  node: string;
-  dependencies: string[];
-  transitive?: string[];
-} {
+export function queryDependencies(ctx: ToolContext, nodeId: string, depth: number = 1, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const direct = ctx.store.getDependencies(nodeId);
 
   if (depth <= 1) {
-    return { node: nodeId, dependencies: direct };
+    const deps = truncateList(direct, verbosity);
+    return {
+      node: nodeId,
+      dependencies: deps,
+      ...(deps.length < direct.length ? { totalDependencies: direct.length } : {}),
+    };
   }
 
   const visited = new Set<string>(direct);
@@ -112,18 +108,27 @@ export function queryDependencies(ctx: ToolContext, nodeId: string, depth: numbe
     }
   }
 
-  return { node: nodeId, dependencies: direct, transitive };
+  const truncDirect = truncateList(direct, verbosity);
+  const truncTransitive = truncateList(transitive, verbosity);
+  return {
+    node: nodeId,
+    dependencies: truncDirect,
+    ...(truncDirect.length < direct.length ? { totalDependencies: direct.length } : {}),
+    transitive: truncTransitive,
+    ...(truncTransitive.length < transitive.length ? { totalTransitive: transitive.length } : {}),
+  };
 }
 
-export function queryDependents(ctx: ToolContext, nodeId: string, depth: number = 1): {
-  node: string;
-  dependents: string[];
-  transitive?: string[];
-} {
+export function queryDependents(ctx: ToolContext, nodeId: string, depth: number = 1, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const direct = ctx.store.getDependents(nodeId);
 
   if (depth <= 1) {
-    return { node: nodeId, dependents: direct };
+    const deps = truncateList(direct, verbosity);
+    return {
+      node: nodeId,
+      dependents: deps,
+      ...(deps.length < direct.length ? { totalDependents: direct.length } : {}),
+    };
   }
 
   const visited = new Set<string>(direct);
@@ -151,27 +156,43 @@ export function queryDependents(ctx: ToolContext, nodeId: string, depth: number 
     }
   }
 
-  return { node: nodeId, dependents: direct, transitive };
+  const truncDirect = truncateList(direct, verbosity);
+  const truncTransitive = truncateList(transitive, verbosity);
+  return {
+    node: nodeId,
+    dependents: truncDirect,
+    ...(truncDirect.length < direct.length ? { totalDependents: direct.length } : {}),
+    transitive: truncTransitive,
+    ...(truncTransitive.length < transitive.length ? { totalTransitive: transitive.length } : {}),
+  };
 }
 
-export function detectCyclesHandler(ctx: ToolContext): {
-  cycles: string[][];
-  count: number;
-} {
+export function detectCyclesHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const cycles = findCycles(ctx.store);
-  return { cycles, count: cycles.length };
+  const truncated = truncateList(cycles, verbosity, 20, 3);
+  return {
+    cycles: truncated,
+    count: cycles.length,
+    ...(truncated.length < cycles.length ? { showing: truncated.length } : {}),
+  };
 }
 
-export function findOrphansHandler(ctx: ToolContext): {
-  files: string[];
-  functions: string[];
-  zombieExports: string[];
-} {
+export function findOrphansHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const entryPoints = new Set(ctx.config.entryPoints);
-  return findOrphans(ctx.store, entryPoints);
+  const orphans = findOrphans(ctx.store, entryPoints);
+  return {
+    files: truncateList(orphans.files, verbosity),
+    functions: truncateList(orphans.functions, verbosity),
+    zombieExports: truncateList(orphans.zombieExports, verbosity),
+    counts: {
+      files: orphans.files.length,
+      functions: orphans.functions.length,
+      zombieExports: orphans.zombieExports.length,
+    },
+  };
 }
 
-export function healthReportHandler(ctx: ToolContext) {
+export function healthReportHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   return computeHealthReport(ctx.store, {
     entryPoints: new Set(ctx.config.entryPoints),
     maxCallChainDepth: ctx.config.maxCallChainDepth,
@@ -179,8 +200,9 @@ export function healthReportHandler(ctx: ToolContext) {
   });
 }
 
-export function checkArchitectureRulesHandler(ctx: ToolContext) {
-  return checkRules(ctx.store, ctx.config.architectureRules);
+export function checkArchitectureRulesHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const violations = checkRules(ctx.store, ctx.config.architectureRules);
+  return truncateList(violations, verbosity, 50, 10);
 }
 
 export async function searchSymbolsHandler(ctx: ToolContext, query: string, topK: number = 10, useEmbeddings: boolean = false) {
@@ -197,7 +219,7 @@ export async function searchSymbolsHandler(ctx: ToolContext, query: string, topK
 
 // --- Temporal/Knowledge Handlers ---
 
-export async function getChangeCouplingHandler(ctx: ToolContext) {
+export async function getChangeCouplingHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const analyzer = new GitAnalyzer(ctx.repoRoot);
   if (!(await analyzer.isGitRepo())) {
     return { error: "Not a git repository", coChanges: [] };
@@ -208,10 +230,14 @@ export async function getChangeCouplingHandler(ctx: ToolContext) {
     1, // low threshold to return more results
   );
 
-  return { coChanges, lookbackDays: ctx.config.temporal.lookbackDays };
+  return {
+    coChanges: truncateList(coChanges, verbosity, 30, 10),
+    totalCoChanges: coChanges.length,
+    lookbackDays: ctx.config.temporal.lookbackDays,
+  };
 }
 
-export async function getKnowledgeMapHandler(ctx: ToolContext) {
+export async function getKnowledgeMapHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const analyzer = new GitAnalyzer(ctx.repoRoot);
   if (!(await analyzer.isGitRepo())) {
     return { error: "Not a git repository", files: [] };
@@ -251,12 +277,15 @@ export async function getKnowledgeMapHandler(ctx: ToolContext) {
     totalFiles: files.length,
     analyzedFiles: ownershipResults.length,
     siloCount: silos.length,
-    silos: silos.map((s) => ({ file: s.filePath, author: s.primaryAuthor, score: s.knowledgeScore })),
-    busFactors,
+    silos: truncateList(
+      silos.map((s) => ({ file: s.filePath, author: s.primaryAuthor, score: s.knowledgeScore })),
+      verbosity,
+    ),
+    busFactors: truncateList(busFactors, verbosity),
   };
 }
 
-export async function getChangeRiskHandler(ctx: ToolContext, filePath: string) {
+export async function getChangeRiskHandler(ctx: ToolContext, filePath: string, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const analyzer = new GitAnalyzer(ctx.repoRoot);
   if (!(await analyzer.isGitRepo())) {
     return { error: "Not a git repository", filePath, risk: "unknown" };
@@ -318,7 +347,7 @@ export async function getChangeRiskHandler(ctx: ToolContext, filePath: string) {
 
 // --- Advanced Tool Handlers ---
 
-export async function findHotspotsHandler(ctx: ToolContext) {
+export async function findHotspotsHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const analyzer = new GitAnalyzer(ctx.repoRoot);
   if (!(await analyzer.isGitRepo())) {
     return { error: "Not a git repository", hotspots: [] };
@@ -343,10 +372,14 @@ export async function findHotspotsHandler(ctx: ToolContext) {
   });
 
   hotspots.sort((a, b) => b.complexityScore - a.complexityScore);
-  return { hotspots, lookbackDays: ctx.config.temporal.lookbackDays };
+  return {
+    hotspots: truncateList(hotspots, verbosity, 20, 5),
+    totalHotspots: hotspots.length,
+    lookbackDays: ctx.config.temporal.lookbackDays,
+  };
 }
 
-export function findCodeSmellsHandler(ctx: ToolContext) {
+export function findCodeSmellsHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const smells: Array<{ type: string; severity: string; file: string; message: string }> = [];
 
   // God files (too many exports)
@@ -400,10 +433,10 @@ export function findCodeSmellsHandler(ctx: ToolContext) {
     });
   }
 
-  return { smells, count: smells.length };
+  return { smells: truncateList(smells, verbosity, 30, 5), count: smells.length };
 }
 
-export function getArchitectureOverviewHandler(ctx: ToolContext) {
+export function getArchitectureOverviewHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const stats = ctx.store.getStats();
   const communities = detectCommunities(ctx.store);
   const cycles = findCycles(ctx.store);
@@ -439,7 +472,7 @@ export function getArchitectureOverviewHandler(ctx: ToolContext) {
   };
 }
 
-export function getCommunityHandler(ctx: ToolContext, communityId: number) {
+export function getCommunityHandler(ctx: ToolContext, communityId: number, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const communities = detectCommunities(ctx.store);
 
   const files: string[] = [];
@@ -466,7 +499,7 @@ export function getCommunityHandler(ctx: ToolContext, communityId: number) {
   return {
     communityId,
     fileCount: files.length,
-    files,
+    files: truncateList(files, verbosity),
     internalEdges,
     externalEdges,
     cohesion: internalEdges + externalEdges > 0
@@ -475,7 +508,7 @@ export function getCommunityHandler(ctx: ToolContext, communityId: number) {
   };
 }
 
-export function getReviewContextHandler(ctx: ToolContext, filePaths: string[]) {
+export function getReviewContextHandler(ctx: ToolContext, filePaths: string[], verbosity: Verbosity = DEFAULT_VERBOSITY) {
   const context = filePaths.map((filePath) => {
     const node = ctx.store.getNode(filePath);
     const deps = ctx.store.getDependencies(filePath);
@@ -493,17 +526,18 @@ export function getReviewContextHandler(ctx: ToolContext, filePaths: string[]) {
       filePath,
       exists: !!node,
       loc: node?.loc ?? 0,
-      symbols,
-      dependencies: deps,
-      dependents,
+      symbols: truncateList(symbols, verbosity),
+      dependencies: truncateList(deps, verbosity),
+      dependents: truncateList(dependents, verbosity),
       impactRadius: dependents.length,
+      ...(verbosity === "minimal" ? {} : {}),
     };
   });
 
   return { files: context, totalImpactRadius: context.reduce((sum, c) => sum + c.impactRadius, 0) };
 }
 
-export function planMigrationHandler(ctx: ToolContext, sourcePattern: string) {
+export function planMigrationHandler(ctx: ToolContext, sourcePattern: string, verbosity: Verbosity = DEFAULT_VERBOSITY) {
   // Find files matching the pattern
   const { Glob } = require("bun") as typeof import("bun");
   const glob = new Glob(sourcePattern);

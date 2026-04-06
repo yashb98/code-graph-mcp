@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import type { Verbosity } from "./types.js";
 import { loadConfig } from "./config.js";
 import { registerResources } from "./mcp/resources.js";
 import { registerPrompts } from "./mcp/prompts.js";
@@ -25,6 +26,9 @@ import {
   getReviewContextHandler,
   planMigrationHandler,
 } from "./mcp/tools.js";
+
+const verbositySchema = z.enum(["minimal", "normal", "detailed"]).optional().default("normal")
+  .describe("Response detail level: minimal (counts only), normal (default), detailed (everything)");
 
 const repoRoot = process.env.CODE_GRAPH_REPO ?? process.cwd();
 const config = loadConfig(repoRoot);
@@ -63,9 +67,9 @@ server.tool(
 server.tool(
   "get_stats",
   "Get graph statistics: node count, edge count, file count, symbol count, community count",
-  {},
-  async () => {
-    const stats = getStats(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const stats = getStats(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(stats, null, 2) }] };
   }
 );
@@ -76,9 +80,10 @@ server.tool(
   {
     node_id: z.string().describe("File path or symbol ID (e.g. 'src/index.ts' or 'src/index.ts::main')"),
     depth: z.number().optional().default(1).describe("Traversal depth (1=direct, 2+=transitive)"),
+    verbosity: verbositySchema,
   },
-  async ({ node_id, depth }) => {
-    const result = queryDependencies(ctx, node_id, depth);
+  async ({ node_id, depth, verbosity }) => {
+    const result = queryDependencies(ctx, node_id, depth, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -89,9 +94,10 @@ server.tool(
   {
     node_id: z.string().describe("File path or symbol ID"),
     depth: z.number().optional().default(1).describe("Traversal depth (1=direct, 2+=transitive)"),
+    verbosity: verbositySchema,
   },
-  async ({ node_id, depth }) => {
-    const result = queryDependents(ctx, node_id, depth);
+  async ({ node_id, depth, verbosity }) => {
+    const result = queryDependents(ctx, node_id, depth, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -99,9 +105,9 @@ server.tool(
 server.tool(
   "detect_cycles",
   "Find circular dependency cycles in the codebase using Tarjan's SCC algorithm",
-  {},
-  async () => {
-    const result = detectCyclesHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = detectCyclesHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -109,9 +115,9 @@ server.tool(
 server.tool(
   "find_orphans",
   "Find orphan files (no importers), unused functions, and zombie exports",
-  {},
-  async () => {
-    const result = findOrphansHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = findOrphansHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -119,9 +125,9 @@ server.tool(
 server.tool(
   "health_report",
   "Generate a comprehensive health report with 8-category scoring (0-100) and letter grade",
-  {},
-  async () => {
-    const report = healthReportHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const report = healthReportHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
   }
 );
@@ -129,9 +135,9 @@ server.tool(
 server.tool(
   "check_architecture_rules",
   "Check architecture rules defined in codegraph.config.json — dependency, layer, and boundary rules",
-  {},
-  async () => {
-    const violations = checkArchitectureRulesHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const violations = checkArchitectureRulesHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(violations, null, 2) }] };
   }
 );
@@ -143,6 +149,7 @@ server.tool(
     query: z.string().describe("Search query (name, keyword, or natural language description)"),
     top_k: z.number().optional().default(10).describe("Number of results to return"),
     use_embeddings: z.boolean().optional().default(false).describe("Use ML embeddings for semantic search (slower but finds conceptual matches)"),
+    verbosity: verbositySchema,
   },
   async ({ query, top_k, use_embeddings }) => {
     const results = await searchSymbolsHandler(ctx, query, top_k, use_embeddings);
@@ -155,9 +162,9 @@ server.tool(
 server.tool(
   "get_change_coupling",
   "Find files that frequently change together (temporal coupling from git history)",
-  {},
-  async () => {
-    const result = await getChangeCouplingHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = await getChangeCouplingHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -165,9 +172,9 @@ server.tool(
 server.tool(
   "get_knowledge_map",
   "Get developer ownership map, knowledge silos, and bus factor per community",
-  {},
-  async () => {
-    const result = await getKnowledgeMapHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = await getKnowledgeMapHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -177,9 +184,10 @@ server.tool(
   "Assess risk score for changing a specific file based on churn, coupling, ownership, and dependencies",
   {
     file_path: z.string().describe("File path to assess risk for"),
+    verbosity: verbositySchema,
   },
-  async ({ file_path }) => {
-    const result = await getChangeRiskHandler(ctx, file_path);
+  async ({ file_path, verbosity }) => {
+    const result = await getChangeRiskHandler(ctx, file_path, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -189,9 +197,9 @@ server.tool(
 server.tool(
   "find_hotspots",
   "Find code hotspots — files with high churn AND high connectivity (most risky to change)",
-  {},
-  async () => {
-    const result = await findHotspotsHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = await findHotspotsHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -199,9 +207,9 @@ server.tool(
 server.tool(
   "find_code_smells",
   "Detect code smells: god files, circular deps, hub nodes, bridge nodes",
-  {},
-  async () => {
-    const result = findCodeSmellsHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = findCodeSmellsHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -209,9 +217,9 @@ server.tool(
 server.tool(
   "get_architecture_overview",
   "High-level architecture overview: communities, cycles, components, hubs",
-  {},
-  async () => {
-    const result = getArchitectureOverviewHandler(ctx);
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = getArchitectureOverviewHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -221,9 +229,10 @@ server.tool(
   "Get details about a specific community: files, internal/external edges, cohesion",
   {
     community_id: z.number().describe("Community ID from get_architecture_overview"),
+    verbosity: verbositySchema,
   },
-  async ({ community_id }) => {
-    const result = getCommunityHandler(ctx, community_id);
+  async ({ community_id, verbosity }) => {
+    const result = getCommunityHandler(ctx, community_id, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -233,9 +242,10 @@ server.tool(
   "Get review context for specific files: symbols, dependencies, dependents, impact radius",
   {
     file_paths: z.array(z.string()).describe("List of file paths to get context for"),
+    verbosity: verbositySchema,
   },
-  async ({ file_paths }) => {
-    const result = getReviewContextHandler(ctx, file_paths);
+  async ({ file_paths, verbosity }) => {
+    const result = getReviewContextHandler(ctx, file_paths, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -245,9 +255,10 @@ server.tool(
   "Plan migration order for files matching a pattern using topological sort",
   {
     source_pattern: z.string().describe("Glob pattern of files to migrate (e.g. 'src/legacy/**')"),
+    verbosity: verbositySchema,
   },
-  async ({ source_pattern }) => {
-    const result = planMigrationHandler(ctx, source_pattern);
+  async ({ source_pattern, verbosity }) => {
+    const result = planMigrationHandler(ctx, source_pattern, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
