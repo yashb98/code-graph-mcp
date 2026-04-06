@@ -26,6 +26,7 @@ import {
   getCommunityHandler,
   getReviewContextHandler,
   planMigrationHandler,
+  detectClonesHandler,
 } from "./mcp/tools.js";
 
 const verbositySchema = z.enum(["minimal", "normal", "detailed"]).optional().default("normal")
@@ -262,6 +263,19 @@ server.tool(
   },
   async ({ source_pattern, verbosity }) => {
     const result = planMigrationHandler(ctx, source_pattern, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "detect_clones",
+  "Detect duplicate code — exact clones found by hashing function/class bodies",
+  {
+    min_loc: z.number().optional().default(5).describe("Minimum lines of code for a function to be checked"),
+    verbosity: verbositySchema,
+  },
+  async ({ min_loc, verbosity }) => {
+    const result = await detectClonesHandler(ctx, min_loc, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );

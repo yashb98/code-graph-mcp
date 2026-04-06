@@ -10,6 +10,7 @@ import {
   planMigrationHandler,
   findHotspotsHandler,
   searchSymbolsHandler,
+  detectClonesHandler,
 } from "../../src/mcp/tools.js";
 import { join } from "path";
 
@@ -116,5 +117,14 @@ describe("Advanced MCP Tools", () => {
       expect(result.hotspots[0].filePath).toBeDefined();
       expect(result.hotspots[0].commits).toBeGreaterThan(0);
     }
+  });
+
+  test("detect_clones returns structured results", async () => {
+    const result = await detectClonesHandler(ctx);
+    expect(result).toBeDefined();
+    expect(typeof result.totalClones).toBe("number");
+    expect(typeof result.totalClonedLines).toBe("number");
+    expect(typeof result.cloneRatio).toBe("number");
+    expect(Array.isArray(result.clones)).toBe(true);
   });
 });

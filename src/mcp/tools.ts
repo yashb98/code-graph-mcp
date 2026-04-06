@@ -8,6 +8,7 @@ import { SemanticIndex } from "../search/semantic.js";
 import { GitAnalyzer } from "../temporal/git-analyzer.js";
 import { computeOwnership } from "../knowledge/ownership.js";
 import { computeBusFactor } from "../knowledge/bus-factor.js";
+import { detectClones } from "../analysis/clone-detection.js";
 import type { CodeGraphConfig, Verbosity } from "../types.js";
 import { shapeResponse, truncateList, DEFAULT_VERBOSITY } from "./verbosity.js";
 
@@ -608,5 +609,88 @@ export function planMigrationHandler(ctx: ToolContext, sourcePattern: string, ve
       files,
       description: i === 0 ? "Leaf files (no internal dependents)" : `Files depending on phase ${i}`,
     })),
+  };
+}
+
+// --- Clone Detection Handler ---
+
+export async function detectClonesHandler(ctx: ToolContext, minLoc: number = 5, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const { join } = require("path") as typeof import("path");
+  const { readFileSync } = require("fs") as typeof import("fs");
+
+  // Read file contents and collect symbol offsets
+  const fileContents = new Map<string, string>();
+  const symbols: Array<{
+    filePath: string;
+    name: string;
+    line: number;
+    loc: number;
+    startOffset: number;
+    endOffset: number;
+  }> = [];
+
+  ctx.store.forEachNode((id, attrs) => {
+    if (attrs.kind === "file") {
+      try {
+        const fullPath = join(ctx.repoRoot, id);
+        const content = readFileSync(fullPath, "utf-8");
+        fileContents.set(id, content);
+      } catch {
+        // File may have been deleted
+      }
+    }
+  });
+
+  // Re-parse to get symbol offsets (we need start/end byte positions)
+  const { parseFile } = require("../parser/oxc-parser.js") as typeof import("../parser/oxc-parser.js");
+  const { parseSync, Visitor } = require("oxc-parser") as typeof import("oxc-parser");
+
+  for (const [filePath, content] of fileContents) {
+    try {
+      const parsed = parseSync(filePath, content, { sourceType: "module" });
+      if (!parsed.program) continue;
+
+      const visitor = new Visitor({
+        FunctionDeclaration(node: any) {
+          if (node.id?.name && (node.end - node.start) > 0) {
+            const lines = content.substring(node.start, node.end).split("\n").length;
+            symbols.push({
+              filePath,
+              name: node.id.name,
+              line: content.substring(0, node.start).split("\n").length,
+              loc: lines,
+              startOffset: node.start,
+              endOffset: node.end,
+            });
+          }
+        },
+        ClassDeclaration(node: any) {
+          if (node.id?.name && (node.end - node.start) > 0) {
+            const lines = content.substring(node.start, node.end).split("\n").length;
+            symbols.push({
+              filePath,
+              name: node.id.name,
+              line: content.substring(0, node.start).split("\n").length,
+              loc: lines,
+              startOffset: node.start,
+              endOffset: node.end,
+            });
+          }
+        },
+      });
+
+      visitor.visit(parsed.program);
+    } catch {
+      // Skip files that fail to parse
+    }
+  }
+
+  const report = await detectClones(fileContents, symbols, { minLoc });
+
+  return {
+    clones: truncateList(report.clones, verbosity, 20, 5),
+    totalClones: report.clones.length,
+    totalClonedLines: report.totalClonedLines,
+    cloneRatio: report.cloneRatio,
   };
 }
