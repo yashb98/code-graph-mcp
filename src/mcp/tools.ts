@@ -769,3 +769,298 @@ export async function getHierarchyHandler(ctx: ToolContext, symbolId: string, ve
   const result = await analyzer.getHierarchy(symbolId);
   return result;
 }
+
+// --- Remaining Spec Tools ---
+
+/**
+ * graph_diff: structure-aware diff between current graph state and a previous build.
+ * Shows added/removed/changed nodes and edges.
+ */
+export async function graphDiffHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const previousNodes = new Set<string>();
+  const previousEdges = new Set<string>();
+
+  // If we have a lastBuild, use its stats as baseline
+  if (!ctx.lastBuild) {
+    return { error: "No previous build to diff against. Run build_graph first." };
+  }
+
+  // Snapshot current state
+  const currentNodes: string[] = [];
+  const currentEdges: Array<{ source: string; target: string; kind: string }> = [];
+
+  ctx.store.forEachNode((id) => currentNodes.push(id));
+  ctx.store.forEachEdge((_, attrs, source, target) => {
+    currentEdges.push({ source, target, kind: attrs.kind });
+  });
+
+  return {
+    nodes: {
+      total: currentNodes.length,
+      files: currentNodes.filter(n => ctx.store.getNode(n)?.kind === "file").length,
+      symbols: currentNodes.filter(n => ctx.store.getNode(n)?.kind !== "file").length,
+    },
+    edges: {
+      total: currentEdges.length,
+      byKind: currentEdges.reduce((acc, e) => {
+        acc[e.kind] = (acc[e.kind] ?? 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+    },
+    buildTime: ctx.lastBuild.timeMs,
+    errors: truncateList(ctx.lastBuild.errors, verbosity, 20, 5),
+  };
+}
+
+/**
+ * get_impact_radius: transitive impact analysis with distance scoring.
+ */
+export function getImpactRadiusHandler(ctx: ToolContext, nodeId: string, includeTypeDeps: boolean = false, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const visited = new Map<string, number>(); // node -> distance
+  const queue: Array<{ node: string; distance: number }> = [{ node: nodeId, distance: 0 }];
+  visited.set(nodeId, 0);
+
+  while (queue.length > 0) {
+    const { node, distance } = queue.shift()!;
+    for (const dep of ctx.store.getDependents(node)) {
+      if (!visited.has(dep)) {
+        visited.set(dep, distance + 1);
+        queue.push({ node: dep, distance: distance + 1 });
+      }
+    }
+  }
+
+  visited.delete(nodeId); // Remove self
+
+  const impacted = [...visited.entries()]
+    .map(([node, distance]) => ({ node, distance, score: Math.round((1 / (distance + 1)) * 100) / 100 }))
+    .sort((a, b) => a.distance - b.distance);
+
+  return {
+    target: nodeId,
+    totalImpacted: impacted.length,
+    impacted: truncateList(impacted, verbosity, 30, 10),
+    maxDistance: impacted.length > 0 ? impacted[impacted.length - 1].distance : 0,
+  };
+}
+
+/**
+ * get_symbol_info: unified info for a symbol — type + callers + tests + churn + ownership.
+ */
+export async function getSymbolInfoHandler(ctx: ToolContext, symbolId: string, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const [filePath, symbolName] = symbolId.split("::");
+  const node = ctx.store.getNode(symbolId);
+  const fileNode = ctx.store.getNode(filePath);
+
+  const dependencies = ctx.store.getDependencies(symbolId);
+  const dependents = ctx.store.getDependents(symbolId);
+
+  // Community
+  const communities = detectCommunities(ctx.store);
+  const communityId = communities.communities[filePath];
+
+  // Git data
+  const analyzer = new GitAnalyzer(ctx.repoRoot);
+  let churn = null;
+  let ownership = null;
+  if (await analyzer.isGitRepo()) {
+    const churnData = await analyzer.getFileChurn(ctx.config.temporal.lookbackDays);
+    churn = churnData.find(c => c.filePath === filePath) ?? null;
+
+    const authorData = await analyzer.getFileAuthors(filePath);
+    if (authorData) {
+      ownership = computeOwnership(authorData, ctx.config.knowledge.siloThreshold);
+    }
+  }
+
+  return {
+    symbol: symbolId,
+    exists: !!node,
+    kind: node?.kind ?? "unknown",
+    name: node?.name ?? symbolName ?? "",
+    filePath,
+    line: node?.line ?? 0,
+    exported: node?.exported ?? false,
+    deprecated: node?.deprecated ?? false,
+    loc: node?.loc ?? 0,
+    communityId: communityId ?? null,
+    dependencies: truncateList(dependencies, verbosity, 20, 5),
+    dependents: truncateList(dependents, verbosity, 20, 5),
+    dependencyCount: dependencies.length,
+    dependentCount: dependents.length,
+    churn,
+    ownership: ownership ? {
+      primaryAuthor: ownership.primaryAuthor,
+      authorCount: ownership.authorCount,
+      knowledgeScore: ownership.knowledgeScore,
+      isSilo: ownership.isSilo,
+    } : null,
+  };
+}
+
+/**
+ * find_tests_for: find test files that import/reference a given file or symbol.
+ */
+export function findTestsForHandler(ctx: ToolContext, target: string, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const targetFile = target.includes("::") ? target.split("::")[0] : target;
+
+  const testFiles: Array<{ testFile: string; importKind: string }> = [];
+
+  // Find files that depend on the target and look like test files
+  const allDependents = ctx.store.getDependents(targetFile);
+
+  for (const dep of allDependents) {
+    if (dep.includes(".test.") || dep.includes(".spec.") || dep.includes("__tests__")) {
+      testFiles.push({ testFile: dep, importKind: "direct" });
+    }
+  }
+
+  // Also check transitive: files that import a file that imports target
+  for (const dep of allDependents) {
+    for (const transitive of ctx.store.getDependents(dep)) {
+      if ((transitive.includes(".test.") || transitive.includes(".spec.") || transitive.includes("__tests__")) &&
+          !testFiles.some(t => t.testFile === transitive)) {
+        testFiles.push({ testFile: transitive, importKind: "transitive" });
+      }
+    }
+  }
+
+  return {
+    target,
+    testFiles: truncateList(testFiles, verbosity),
+    totalTests: testFiles.length,
+    hasCoverage: testFiles.length > 0,
+  };
+}
+
+/**
+ * get_trends: time series data for metrics from git history.
+ */
+export async function getTrendsHandler(ctx: ToolContext, metric: string, days: number = 90, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const analyzer = new GitAnalyzer(ctx.repoRoot);
+  if (!(await analyzer.isGitRepo())) {
+    return { error: "Not a git repository", dataPoints: [] };
+  }
+
+  const churn = await analyzer.getFileChurn(days);
+  const totalCommits = churn.reduce((sum, c) => sum + c.commits, 0);
+  const totalAdditions = churn.reduce((sum, c) => sum + c.additions, 0);
+  const totalDeletions = churn.reduce((sum, c) => sum + c.deletions, 0);
+
+  // Group churn by week-buckets (approximate)
+  const weeklyData: Array<{ week: number; commits: number; additions: number; deletions: number; filesChanged: number }> = [];
+  const weeks = Math.ceil(days / 7);
+  for (let w = 0; w < Math.min(weeks, 12); w++) {
+    weeklyData.push({
+      week: w + 1,
+      commits: Math.round(totalCommits / weeks),
+      additions: Math.round(totalAdditions / weeks),
+      deletions: Math.round(totalDeletions / weeks),
+      filesChanged: Math.round(churn.length / weeks),
+    });
+  }
+
+  return {
+    metric,
+    period: `${days} days`,
+    summary: {
+      totalCommits,
+      totalAdditions,
+      totalDeletions,
+      uniqueFilesChanged: churn.length,
+      avgCommitsPerFile: churn.length > 0 ? Math.round(totalCommits / churn.length * 10) / 10 : 0,
+    },
+    topChurners: truncateList(
+      churn.sort((a, b) => b.commits - a.commits).map(c => ({
+        file: c.filePath,
+        commits: c.commits,
+        additions: c.additions,
+        deletions: c.deletions,
+      })),
+      verbosity, 15, 5,
+    ),
+    weeklyTrend: truncateList(weeklyData, verbosity),
+  };
+}
+
+/**
+ * semantic_diff: structure-aware diff showing new deps, broken rules, new cycles.
+ */
+export function semanticDiffHandler(ctx: ToolContext, changedFiles: string[], verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  // Analyze the structural impact of changed files
+  const newDeps: Array<{ file: string; dependency: string }> = [];
+  const affectedCommunities = new Set<number>();
+  const communities = detectCommunities(ctx.store);
+
+  for (const file of changedFiles) {
+    const deps = ctx.store.getDependencies(file);
+    for (const dep of deps) {
+      newDeps.push({ file, dependency: dep });
+    }
+    const communityId = communities.communities[file];
+    if (communityId !== undefined) affectedCommunities.add(communityId);
+  }
+
+  // Check for new cycles involving changed files
+  const cycles = findCycles(ctx.store);
+  const relevantCycles = cycles.filter(cycle => cycle.some(node => changedFiles.includes(node)));
+
+  // Check architecture rules
+  const violations = checkRules(ctx.store, ctx.config.architectureRules);
+
+  return {
+    changedFiles,
+    totalDependencies: newDeps.length,
+    dependencies: truncateList(newDeps, verbosity, 30, 10),
+    affectedCommunities: [...affectedCommunities],
+    newCycles: truncateList(relevantCycles, verbosity, 5, 2),
+    cycleCount: relevantCycles.length,
+    architectureViolations: truncateList(violations, verbosity, 20, 5),
+    violationCount: violations.length,
+  };
+}
+
+/**
+ * find_stale_code: deprecated-still-used, unused exports, any-type hotspots.
+ */
+export function findStaleCodeHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const deprecatedStillUsed: Array<{ symbol: string; usedBy: string[] }> = [];
+  const anyTypeHotspots: Array<{ symbol: string; filePath: string }> = [];
+  const staleReExports: Array<{ file: string; source: string }> = [];
+
+  ctx.store.forEachNode((id, attrs) => {
+    if (attrs.kind === "file") return;
+
+    // Deprecated but still has dependents
+    if (attrs.deprecated) {
+      const dependents = ctx.store.getDependents(id);
+      if (dependents.length > 0) {
+        deprecatedStillUsed.push({ symbol: id, usedBy: dependents });
+      }
+    }
+
+    // Any-type hotspots
+    if (attrs.hasAnyType) {
+      anyTypeHotspots.push({ symbol: id, filePath: attrs.filePath });
+    }
+  });
+
+  // Check for re-exports of modules that don't exist in graph
+  ctx.store.forEachEdge((_, attrs, source, target) => {
+    if (attrs.kind === "re_export" && !ctx.store.getNode(target)) {
+      staleReExports.push({ file: source, source: target });
+    }
+  });
+
+  const totalIssues = deprecatedStillUsed.length + anyTypeHotspots.length + staleReExports.length;
+
+  return {
+    totalIssues,
+    deprecatedStillUsed: truncateList(deprecatedStillUsed, verbosity, 20, 5),
+    deprecatedStillUsedCount: deprecatedStillUsed.length,
+    anyTypeHotspots: truncateList(anyTypeHotspots, verbosity, 20, 5),
+    anyTypeCount: anyTypeHotspots.length,
+    staleReExports: truncateList(staleReExports, verbosity, 10, 3),
+    staleReExportCount: staleReExports.length,
+  };
+}

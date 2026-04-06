@@ -17,9 +17,9 @@ Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built wi
 - **Clone detection** — AST body hashing for duplicate code detection
 - **Verbosity control** — Minimal/normal/detailed response levels for token savings
 - **Dual transport** — stdio (default) + streamable HTTP
-- **MCP prompts** — Code review, architecture review, onboarding templates
+- **MCP prompts** — Code review, architecture review, migration, risk assessment, onboarding
 
-## 23 MCP Tools
+## 30 MCP Tools
 
 | Tool | Description |
 |------|-------------|
@@ -45,7 +45,35 @@ Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built wi
 | `resolve_type` | Type info for symbols via TypeScript language service |
 | `get_call_graph` | Type-aware callers/callees for a symbol |
 | `get_hierarchy` | Class/interface inheritance: extends, implements, extendedBy |
+| `graph_diff` | Graph structure snapshot: nodes, edges by kind, build info |
+| `get_impact_radius` | Transitive impact analysis with BFS distance scoring |
+| `get_symbol_info` | Unified symbol info: type, deps, churn, ownership, community |
+| `find_tests_for` | Find test files that import/reference a given file |
+| `get_trends` | Time series churn data grouped by weeks |
+| `semantic_diff` | Structural diff: new deps, cycles, rule violations |
+| `find_stale_code` | Deprecated-still-used, any-type hotspots, stale re-exports |
 | `ping` | Health check |
+
+## 6 MCP Resources
+
+| Resource | URI Pattern |
+|----------|-------------|
+| `overview` | `codegraph://repo/{name}/overview` |
+| `health` | `codegraph://repo/{name}/health` |
+| `community` | `codegraph://repo/{name}/community/{id}` |
+| `hotspots` | `codegraph://repo/{name}/hotspots` |
+| `architecture` | `codegraph://repo/{name}/architecture` |
+| `changes` | `codegraph://repo/{name}/changes` |
+
+## 5 MCP Prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `code-review` | Generate a code review checklist for recent changes |
+| `architecture-review` | Analyze codebase architecture and suggest improvements |
+| `migration-plan` | Plan a migration for files matching a pattern |
+| `risk-assessment` | Assess risk for changed files before merge |
+| `onboarding` | Generate an onboarding guide for new developers |
 
 ## Quick Start
 
@@ -123,4 +151,4 @@ Add to your MCP settings:
 
 ## Test Coverage
 
-212 tests | 92.7% line coverage | 91.9% function coverage
+221 tests | 92%+ line coverage

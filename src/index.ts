@@ -30,6 +30,13 @@ import {
   resolveTypeHandler,
   getCallGraphHandler,
   getHierarchyHandler,
+  graphDiffHandler,
+  getImpactRadiusHandler,
+  getSymbolInfoHandler,
+  findTestsForHandler,
+  getTrendsHandler,
+  semanticDiffHandler,
+  findStaleCodeHandler,
 } from "./mcp/tools.js";
 
 const verbositySchema = z.enum(["minimal", "normal", "detailed"]).optional().default("normal")
@@ -322,6 +329,95 @@ server.tool(
   },
   async ({ symbol_id, verbosity }) => {
     const result = await getHierarchyHandler(ctx, symbol_id, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// --- Remaining Spec Tools ---
+
+server.tool(
+  "graph_diff",
+  "Show current graph structure: node/edge counts by type, build errors",
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = await graphDiffHandler(ctx, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_impact_radius",
+  "Get all transitively affected nodes for a file/symbol, scored by distance",
+  {
+    node_id: z.string().describe("File path or symbol ID"),
+    include_type_deps: z.boolean().optional().default(false).describe("Include type-only dependencies"),
+    verbosity: verbositySchema,
+  },
+  async ({ node_id, include_type_deps, verbosity }) => {
+    const result = getImpactRadiusHandler(ctx, node_id, include_type_deps, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_symbol_info",
+  "Unified info for a symbol: type, dependencies, dependents, churn, ownership, community",
+  {
+    symbol_id: z.string().describe("Symbol ID (e.g. 'src/file.ts::functionName')"),
+    verbosity: verbositySchema,
+  },
+  async ({ symbol_id, verbosity }) => {
+    const result = await getSymbolInfoHandler(ctx, symbol_id, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "find_tests_for",
+  "Find test files that cover a given file or symbol (direct and transitive imports)",
+  {
+    target: z.string().describe("File path or symbol ID to find tests for"),
+    verbosity: verbositySchema,
+  },
+  async ({ target, verbosity }) => {
+    const result = findTestsForHandler(ctx, target, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_trends",
+  "Get time series data for churn, commits, and code velocity over a period",
+  {
+    metric: z.string().optional().default("churn").describe("Metric to track: churn, commits, velocity"),
+    days: z.number().optional().default(90).describe("Lookback period in days"),
+    verbosity: verbositySchema,
+  },
+  async ({ metric, days, verbosity }) => {
+    const result = await getTrendsHandler(ctx, metric, days, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "semantic_diff",
+  "Structure-aware analysis of changed files: new deps, affected communities, cycles, rule violations",
+  {
+    changed_files: z.array(z.string()).describe("List of changed file paths to analyze"),
+    verbosity: verbositySchema,
+  },
+  async ({ changed_files, verbosity }) => {
+    const result = semanticDiffHandler(ctx, changed_files, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "find_stale_code",
+  "Find deprecated-still-used symbols, any-type hotspots, and stale re-exports",
+  { verbosity: verbositySchema },
+  async ({ verbosity }) => {
+    const result = findStaleCodeHandler(ctx, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
