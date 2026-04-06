@@ -326,6 +326,26 @@ server.tool(
   }
 );
 
+// --- File Watcher (auto-rebuild on changes) ---
+
+if (process.env.CODE_GRAPH_WATCH === "true") {
+  const { startFileWatcher } = await import("./indexer/file-watcher.js");
+  startFileWatcher(repoRoot, {
+    debounceMs: config.watchDebounceMs,
+    include: config.include,
+    onChanges: async (files) => {
+      logger.info("File changes detected, rebuilding graph", { changedFiles: files.length });
+      try {
+        await buildGraph(ctx);
+        logger.info("Graph rebuilt successfully after file changes");
+      } catch (err) {
+        logger.error("Graph rebuild failed", { error: String(err) });
+      }
+    },
+  });
+  logger.info("File watcher started", { debounceMs: config.watchDebounceMs });
+}
+
 // --- Startup ---
 
 logger.info("code-graph-mcp starting", { repoRoot, version: "0.1.0", transport: config.transport });

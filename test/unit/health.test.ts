@@ -137,4 +137,66 @@ describe("Health Report", () => {
     expect(report.score).toBeGreaterThanOrEqual(0);
     expect(report.grade).toBeDefined();
   });
+
+  test("duplication score penalizes high clone ratio", () => {
+    const store = new GraphStore();
+    store.addFileNode("a.ts", { loc: 10 });
+    store.addFileNode("b.ts", { loc: 10 });
+    store.addEdge("a.ts", "b.ts", "runtime_import");
+
+    const report = computeHealthReport(store, {
+      ...defaultOptions,
+      entryPoints: new Set(["a.ts"]),
+      cloneRatio: 0.4,
+    });
+    expect(report.breakdown.duplication.score).toBeLessThan(0.5);
+    const dupeIssue = report.top_issues.find(i => i.message.includes("duplicated"));
+    expect(dupeIssue).toBeDefined();
+  });
+
+  test("knowledge score penalizes silos", () => {
+    const store = new GraphStore();
+    store.addFileNode("a.ts", { loc: 10 });
+
+    const report = computeHealthReport(store, {
+      ...defaultOptions,
+      siloRatio: 0.5,
+      avgKnowledgeScore: 0.3,
+    });
+    expect(report.breakdown.knowledge.score).toBeLessThan(0.8);
+    const siloIssue = report.top_issues.find(i => i.message.includes("silo"));
+    expect(siloIssue).toBeDefined();
+  });
+
+  test("stability score penalizes high churn", () => {
+    const store = new GraphStore();
+    store.addFileNode("a.ts", { loc: 10 });
+
+    const report = computeHealthReport(store, {
+      ...defaultOptions,
+      recentChurnRatio: 0.6,
+    });
+    expect(report.breakdown.stability.score).toBeLessThan(0.5);
+    const churnIssue = report.top_issues.find(i => i.message.includes("churn"));
+    expect(churnIssue).toBeDefined();
+  });
+
+  test("perfect health options produce high scores", () => {
+    const store = new GraphStore();
+    store.addFileNode("a.ts", { loc: 10 });
+    store.addFileNode("b.ts", { loc: 10 });
+    store.addEdge("a.ts", "b.ts", "runtime_import");
+
+    const report = computeHealthReport(store, {
+      ...defaultOptions,
+      entryPoints: new Set(["a.ts"]),
+      cloneRatio: 0,
+      siloRatio: 0,
+      avgKnowledgeScore: 1,
+      recentChurnRatio: 0,
+    });
+    expect(report.breakdown.duplication.score).toBe(1);
+    expect(report.breakdown.knowledge.score).toBe(1);
+    expect(report.breakdown.stability.score).toBe(1);
+  });
 });

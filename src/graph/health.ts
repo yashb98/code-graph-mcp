@@ -7,6 +7,14 @@ interface HealthOptions {
   entryPoints: Set<string>;
   maxCallChainDepth: number;
   hubDegreeMultiplier: number;
+  /** Clone ratio from clone detection (0-1). Default: 0 (no clones) */
+  cloneRatio?: number;
+  /** Knowledge silo ratio (siloFiles / totalFiles). Default: 0 */
+  siloRatio?: number;
+  /** Average knowledge score across files (0-1). Default: 1 */
+  avgKnowledgeScore?: number;
+  /** File churn stability: ratio of files changed recently. Default: 0 */
+  recentChurnRatio?: number;
 }
 
 const WEIGHTS = {
@@ -96,14 +104,30 @@ export function computeHealthReport(store: GraphStore, options: HealthOptions): 
     issues.push({ severity: "medium", message: `${hubs.length} hub nodes with abnormally high connections`, tool: "find_hub_nodes", new: false });
   }
 
-  // 6. Duplication (placeholder — full clone detection is Phase 3+)
-  const duplicationScore = 1.0;
+  // 6. Duplication — based on clone detection ratio
+  const cloneRatio = options.cloneRatio ?? 0;
+  const duplicationScore = Math.max(0, 1 - cloneRatio * 3); // 33% clones = 0 score
 
-  // 7. Knowledge (placeholder — requires git blame data from temporal layer)
-  const knowledgeScore = 1.0;
+  if (cloneRatio > 0.1) {
+    issues.push({ severity: "medium", message: `${Math.round(cloneRatio * 100)}% of code is duplicated`, tool: "detect_clones", new: false });
+  }
 
-  // 8. Stability (placeholder — requires temporal data)
-  const stabilityScore = 1.0;
+  // 7. Knowledge — based on silo ratio and knowledge distribution
+  const siloRatio = options.siloRatio ?? 0;
+  const avgKnowledge = options.avgKnowledgeScore ?? 1;
+  const knowledgeScore = Math.max(0, (1 - siloRatio) * 0.5 + avgKnowledge * 0.5);
+
+  if (siloRatio > 0.3) {
+    issues.push({ severity: "high", message: `${Math.round(siloRatio * 100)}% of files are knowledge silos (single author)`, tool: "get_knowledge_map", new: false });
+  }
+
+  // 8. Stability — based on recent churn
+  const recentChurnRatio = options.recentChurnRatio ?? 0;
+  const stabilityScore = Math.max(0, 1 - recentChurnRatio * 2); // 50% files churning = 0
+
+  if (recentChurnRatio > 0.4) {
+    issues.push({ severity: "medium", message: `${Math.round(recentChurnRatio * 100)}% of files changed recently (high churn)`, tool: "find_hotspots", new: false });
+  }
 
   // Compute weighted total
   const breakdown: Record<string, CategoryScore> = {

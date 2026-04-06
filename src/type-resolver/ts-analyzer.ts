@@ -372,11 +372,108 @@ export class TsAnalyzer implements TypeAnalyzer {
     return result;
   }
 
-  async getBreakingChanges(_oldRef: string, _newRef: string): Promise<BreakingChange[]> {
-    // Breaking change detection requires comparing two versions of the codebase
-    // This is a placeholder — full implementation needs git checkout + diff
-    logger.warn("getBreakingChanges not yet implemented (requires git ref comparison)");
-    return [];
+  /**
+   * Detect breaking changes between two sets of exported symbols.
+   * Compare old and new snapshots of public API: removed exports, changed signatures.
+   *
+   * @param oldExports Map of symbolName -> typeSignature from old version
+   * @param newExports Map of symbolName -> typeSignature from new version
+   */
+  async getBreakingChanges(oldRef: string, newRef: string): Promise<BreakingChange[]> {
+    // oldRef and newRef are treated as file paths to compare
+    // For a full git-based comparison, use git show to get old/new versions
+    // Here we compare current state: oldRef = file with old exports snapshot, newRef = current
+    if (!this.service) throw new Error("TsAnalyzer not initialized");
+
+    const changes: BreakingChange[] = [];
+    const fullOld = this.resolvePath(oldRef);
+    const fullNew = this.resolvePath(newRef);
+
+    const oldExports = this.extractExportedSignatures(fullOld);
+    const newExports = this.extractExportedSignatures(fullNew);
+
+    // Check for removed exports
+    for (const [name, sig] of oldExports) {
+      if (!newExports.has(name)) {
+        const refs = this.service.findReferences(fullOld, this.findSymbolPosition(oldRef, name) ?? 0);
+        const callerCount = refs ? refs.reduce((sum, r) => sum + r.references.filter(ref => !ref.isDefinition).length, 0) : 0;
+        changes.push({
+          symbol: name,
+          filePath: oldRef,
+          changeType: "removed",
+          affectedCallers: callerCount,
+          details: `Exported symbol '${name}' was removed`,
+        });
+      }
+    }
+
+    // Check for signature changes
+    for (const [name, oldSig] of oldExports) {
+      const newSig = newExports.get(name);
+      if (newSig && newSig !== oldSig) {
+        const refs = this.service.findReferences(fullNew, this.findSymbolPosition(newRef, name) ?? 0);
+        const callerCount = refs ? refs.reduce((sum, r) => sum + r.references.filter(ref => !ref.isDefinition).length, 0) : 0;
+        changes.push({
+          symbol: name,
+          filePath: newRef,
+          changeType: "signature_changed",
+          affectedCallers: callerCount,
+          details: `Signature changed: '${oldSig}' -> '${newSig}'`,
+        });
+      }
+    }
+
+    return changes;
+  }
+
+  /** Extract exported symbol names and their type signatures from a file */
+  extractExportedSignatures(fullPath: string): Map<string, string> {
+    const result = new Map<string, string>();
+    if (!this.service) return result;
+
+    const program = this.service.getProgram();
+    if (!program) return result;
+
+    const sourceFile = program.getSourceFile(fullPath);
+    if (!sourceFile) return result;
+
+    const checker = program.getTypeChecker();
+
+    ts.forEachChild(sourceFile, (node) => {
+      // Check if node has export modifier
+      const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+      const isExported = modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+
+      if (!isExported) return;
+
+      let name: string | undefined;
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        name = node.name.text;
+      } else if (ts.isClassDeclaration(node) && node.name) {
+        name = node.name.text;
+      } else if (ts.isInterfaceDeclaration(node) && node.name) {
+        name = node.name.text;
+      } else if (ts.isTypeAliasDeclaration(node)) {
+        name = node.name.text;
+      } else if (ts.isVariableStatement(node)) {
+        for (const decl of node.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name)) {
+            const sym = checker.getSymbolAtLocation(decl.name);
+            const type = sym ? checker.typeToString(checker.getTypeOfSymbolAtLocation(sym, decl)) : "unknown";
+            result.set(decl.name.text, type);
+          }
+        }
+        return;
+      }
+
+      if (name) {
+        const info = this.service!.getQuickInfoAtPosition(fullPath, sourceFile.text.indexOf(name));
+        const sig = info ? ts.displayPartsToString(info.displayParts) : "unknown";
+        result.set(name, sig);
+      }
+    });
+
+    return result;
   }
 
   private getLineFromPos(fileName: string, pos: number): number {

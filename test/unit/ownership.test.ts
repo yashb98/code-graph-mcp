@@ -51,6 +51,21 @@ describe("Ownership", () => {
     expect(result.knowledgeScore).toBeLessThan(0.5);
   });
 
+  test("zero-line file returns unknown author", () => {
+    const authorData: FileAuthor = {
+      filePath: "src/empty.ts",
+      authors: [],
+      primaryAuthor: "unknown",
+      authorCount: 0,
+    };
+
+    const result = computeOwnership(authorData);
+    expect(result.primaryAuthor).toBe("unknown");
+    expect(result.authorCount).toBe(0);
+    expect(result.knowledgeScore).toBe(0);
+    expect(result.isSilo).toBe(true);
+  });
+
   test("custom silo threshold", () => {
     const authorData: FileAuthor = {
       filePath: "src/test.ts",

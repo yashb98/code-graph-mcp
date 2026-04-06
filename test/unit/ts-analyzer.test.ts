@@ -74,4 +74,33 @@ describe("TsAnalyzer", () => {
     await temp.dispose();
     expect(temp.isInitialized()).toBe(false);
   });
+
+  test("extractExportedSignatures returns exported symbols", () => {
+    const fullPath = join(FIXTURE_ROOT, "src/base.ts");
+    const sigs = analyzer.extractExportedSignatures(fullPath);
+    expect(sigs.has("BaseModel")).toBe(true);
+    expect(sigs.has("Serializable")).toBe(true);
+    expect(sigs.has("createId")).toBe(true);
+  });
+
+  test("getBreakingChanges detects no changes when comparing same file", async () => {
+    const changes = await analyzer.getBreakingChanges("src/base.ts", "src/base.ts");
+    expect(changes.length).toBe(0);
+  });
+
+  test("getCallGraph handles nonexistent symbol", async () => {
+    const result = await analyzer.getCallGraph("src/base.ts::nonexistent", "callers", 1);
+    expect(result.edges.length).toBe(0);
+  });
+
+  test("getTypeInfo handles nonexistent symbol", async () => {
+    const result = await analyzer.getTypeInfo("src/base.ts::nonexistent");
+    expect(result.typeString).toBe("unknown");
+  });
+
+  test("resolveSymbol without file context", async () => {
+    const result = await analyzer.resolveSymbol("SomeSymbol");
+    expect(result.name).toBe("SomeSymbol");
+    expect(result.references.length).toBe(0);
+  });
 });

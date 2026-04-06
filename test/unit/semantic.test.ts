@@ -98,4 +98,16 @@ describe("SemanticIndex", () => {
   test("indexGraph throws if not initialized", async () => {
     expect(index.indexGraph(store)).rejects.toThrow("not initialized");
   });
+
+  test("size is 0 for new index", () => {
+    const fresh = new SemanticIndex("custom-model");
+    expect(fresh.size).toBe(0);
+    expect(fresh.isReady()).toBe(false);
+  });
+
+  test("textSearch handles empty store", () => {
+    const emptyStore = new GraphStore();
+    const results = index.textSearch(emptyStore, "anything");
+    expect(results).toEqual([]);
+  });
 });
