@@ -15,7 +15,7 @@ Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built wi
 - **MCP resources** — Live graph overview and health endpoints
 - **MCP prompts** — Code review, architecture review, onboarding templates
 
-## 12 MCP Tools
+## 19 MCP Tools
 
 | Tool | Description |
 |------|-------------|
@@ -27,9 +27,16 @@ Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built wi
 | `find_orphans` | Orphan files, unused functions, zombie exports |
 | `health_report` | 8-category health scoring with letter grade |
 | `check_architecture_rules` | Validate architecture rules from config |
+| `search_symbols` | Text or ML-embedding semantic search for symbols |
 | `get_change_coupling` | Files that frequently co-change |
 | `get_knowledge_map` | Developer ownership, silos, bus factor |
 | `get_change_risk` | Risk scoring for a specific file |
+| `find_hotspots` | Files with high churn + high connectivity |
+| `find_code_smells` | God files, circular deps, hub/bridge nodes |
+| `get_architecture_overview` | High-level overview: communities, cycles, hubs |
+| `get_community` | Community details: files, edges, cohesion |
+| `get_review_context` | Review context for specific files |
+| `plan_migration` | Topological migration order for file patterns |
 | `ping` | Health check |
 
 ## Quick Start

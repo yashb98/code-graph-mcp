@@ -18,6 +18,12 @@ import {
   getChangeRiskHandler,
   checkArchitectureRulesHandler,
   searchSymbolsHandler,
+  findHotspotsHandler,
+  findCodeSmellsHandler,
+  getArchitectureOverviewHandler,
+  getCommunityHandler,
+  getReviewContextHandler,
+  planMigrationHandler,
 } from "./mcp/tools.js";
 
 const repoRoot = process.env.CODE_GRAPH_REPO ?? process.cwd();
@@ -174,6 +180,74 @@ server.tool(
   },
   async ({ file_path }) => {
     const result = await getChangeRiskHandler(ctx, file_path);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// --- Advanced Tools ---
+
+server.tool(
+  "find_hotspots",
+  "Find code hotspots — files with high churn AND high connectivity (most risky to change)",
+  {},
+  async () => {
+    const result = await findHotspotsHandler(ctx);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "find_code_smells",
+  "Detect code smells: god files, circular deps, hub nodes, bridge nodes",
+  {},
+  async () => {
+    const result = findCodeSmellsHandler(ctx);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_architecture_overview",
+  "High-level architecture overview: communities, cycles, components, hubs",
+  {},
+  async () => {
+    const result = getArchitectureOverviewHandler(ctx);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_community",
+  "Get details about a specific community: files, internal/external edges, cohesion",
+  {
+    community_id: z.number().describe("Community ID from get_architecture_overview"),
+  },
+  async ({ community_id }) => {
+    const result = getCommunityHandler(ctx, community_id);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_review_context",
+  "Get review context for specific files: symbols, dependencies, dependents, impact radius",
+  {
+    file_paths: z.array(z.string()).describe("List of file paths to get context for"),
+  },
+  async ({ file_paths }) => {
+    const result = getReviewContextHandler(ctx, file_paths);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "plan_migration",
+  "Plan migration order for files matching a pattern using topological sort",
+  {
+    source_pattern: z.string().describe("Glob pattern of files to migrate (e.g. 'src/legacy/**')"),
+  },
+  async ({ source_pattern }) => {
+    const result = planMigrationHandler(ctx, source_pattern);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
