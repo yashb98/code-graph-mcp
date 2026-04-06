@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { Verbosity } from "./types.js";
 import { loadConfig } from "./config.js";
+import { logger } from "./logger.js";
 import { registerResources } from "./mcp/resources.js";
 import { registerPrompts } from "./mcp/prompts.js";
 import {
@@ -59,7 +60,9 @@ server.tool(
     if (repo_path) {
       ctx.repoRoot = repo_path;
     }
+    logger.info("build_graph started", { repoRoot: ctx.repoRoot });
     const result = await buildGraph(ctx);
+    logger.info("build_graph complete", { files: result.filesParsed, nodes: result.nodeCount, edges: result.edgeCount, ms: result.timeMs });
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );
@@ -263,5 +266,21 @@ server.tool(
   }
 );
 
+// --- Startup ---
+
+logger.info("code-graph-mcp starting", { repoRoot, version: "0.1.0" });
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+logger.info("MCP server connected via stdio");
+
+// --- Graceful shutdown ---
+
+function shutdown(signal: string) {
+  logger.info(`Received ${signal}, shutting down`);
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

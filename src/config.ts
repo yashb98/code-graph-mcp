@@ -1,6 +1,7 @@
 import type { CodeGraphConfig } from "./types.js";
 import { existsSync } from "fs";
 import { join } from "path";
+import { logger } from "./logger.js";
 
 const DEFAULT_CONFIG: CodeGraphConfig = {
   include: ["**/*.ts", "**/*.tsx"],
@@ -42,17 +43,42 @@ const DEFAULT_CONFIG: CodeGraphConfig = {
   },
 };
 
+export function validateConfig(config: CodeGraphConfig): string[] {
+  const warnings: string[] = [];
+  if (config.include.length === 0) warnings.push("include patterns empty — no files will be scanned");
+  if (config.maxFileSize < 1000) warnings.push(`maxFileSize (${config.maxFileSize}) is very low`);
+  if (config.maxFileSize > 500000) warnings.push(`maxFileSize (${config.maxFileSize}) is very high — may cause slow parsing`);
+  if (config.hubDegreeMultiplier < 1) warnings.push("hubDegreeMultiplier < 1 will flag most nodes as hubs");
+  if (config.temporal.lookbackDays < 1) warnings.push("temporal.lookbackDays < 1 — no git history will be analyzed");
+  if (config.knowledge.siloThreshold < 0 || config.knowledge.siloThreshold > 1) {
+    warnings.push(`knowledge.siloThreshold (${config.knowledge.siloThreshold}) should be between 0 and 1`);
+  }
+  return warnings;
+}
+
 export function loadConfig(repoRoot: string): CodeGraphConfig {
   const configPath = join(repoRoot, "codegraph.config.json");
+  let config: CodeGraphConfig;
+
   if (existsSync(configPath)) {
+    logger.info("Loading config", { path: configPath });
     const raw = JSON.parse(require("fs").readFileSync(configPath, "utf-8"));
-    return {
+    config = {
       ...DEFAULT_CONFIG,
       ...raw,
       temporal: { ...DEFAULT_CONFIG.temporal, ...raw.temporal },
       knowledge: { ...DEFAULT_CONFIG.knowledge, ...raw.knowledge },
       sampling: { ...DEFAULT_CONFIG.sampling, ...raw.sampling },
     };
+  } else {
+    logger.info("No codegraph.config.json found, using defaults", { repoRoot });
+    config = { ...DEFAULT_CONFIG };
   }
-  return { ...DEFAULT_CONFIG };
+
+  const warnings = validateConfig(config);
+  for (const w of warnings) {
+    logger.warn(`Config: ${w}`);
+  }
+
+  return config;
 }
