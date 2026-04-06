@@ -268,19 +268,30 @@ server.tool(
 
 // --- Startup ---
 
-logger.info("code-graph-mcp starting", { repoRoot, version: "0.1.0" });
+logger.info("code-graph-mcp starting", { repoRoot, version: "0.1.0", transport: config.transport });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+if (config.transport === "streamable-http") {
+  const { startHttpTransport } = await import("./transport/http.js");
+  const port = parseInt(process.env.CODE_GRAPH_PORT ?? "3100", 10);
+  const host = process.env.CODE_GRAPH_HOST ?? "127.0.0.1";
+  const httpHandle = await startHttpTransport(server, { port, host });
 
-logger.info("MCP server connected via stdio");
+  function shutdown(signal: string) {
+    logger.info(`Received ${signal}, shutting down HTTP transport`);
+    httpHandle.close();
+    process.exit(0);
+  }
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+} else {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  logger.info("MCP server connected via stdio");
 
-// --- Graceful shutdown ---
-
-function shutdown(signal: string) {
-  logger.info(`Received ${signal}, shutting down`);
-  process.exit(0);
+  function shutdown(signal: string) {
+    logger.info(`Received ${signal}, shutting down`);
+    process.exit(0);
+  }
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
-
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
