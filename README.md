@@ -13,9 +13,13 @@ Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built wi
 - **Architecture rules** — Dependency, layer, and boundary enforcement
 - **Merkle indexing** — xxhash-based incremental rebuilds
 - **MCP resources** — Live graph overview and health endpoints
+- **Type resolution** — TypeScript language service for call graphs, hierarchy, type info
+- **Clone detection** — AST body hashing for duplicate code detection
+- **Verbosity control** — Minimal/normal/detailed response levels for token savings
+- **Dual transport** — stdio (default) + streamable HTTP
 - **MCP prompts** — Code review, architecture review, onboarding templates
 
-## 20 MCP Tools
+## 23 MCP Tools
 
 | Tool | Description |
 |------|-------------|
@@ -38,6 +42,9 @@ Type-aware code knowledge graph MCP server for TypeScript/TSX projects. Built wi
 | `get_review_context` | Review context for specific files |
 | `plan_migration` | Topological migration order for file patterns |
 | `detect_clones` | Duplicate code detection via AST body hashing |
+| `resolve_type` | Type info for symbols via TypeScript language service |
+| `get_call_graph` | Type-aware callers/callees for a symbol |
+| `get_hierarchy` | Class/interface inheritance: extends, implements, extendedBy |
 | `ping` | Health check |
 
 ## Quick Start
@@ -116,4 +123,4 @@ Add to your MCP settings:
 
 ## Test Coverage
 
-183 tests | 94.9% line coverage | 94.3% function coverage
+198 tests | 95.1% line coverage | 94.1% function coverage

@@ -27,6 +27,9 @@ import {
   getReviewContextHandler,
   planMigrationHandler,
   detectClonesHandler,
+  resolveTypeHandler,
+  getCallGraphHandler,
+  getHierarchyHandler,
 } from "./mcp/tools.js";
 
 const verbositySchema = z.enum(["minimal", "normal", "detailed"]).optional().default("normal")
@@ -276,6 +279,49 @@ server.tool(
   },
   async ({ min_loc, verbosity }) => {
     const result = await detectClonesHandler(ctx, min_loc, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// --- Type Resolution Tools ---
+
+server.tool(
+  "resolve_type",
+  "Get type information for a symbol or all symbols in a file using TypeScript language service",
+  {
+    symbol_id: z.string().describe("Symbol ID (e.g. 'src/file.ts::functionName') or file path for all symbols"),
+    verbosity: verbositySchema,
+  },
+  async ({ symbol_id, verbosity }) => {
+    const result = await resolveTypeHandler(ctx, symbol_id, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_call_graph",
+  "Get callers/callees of a symbol using TypeScript language service type-aware analysis",
+  {
+    symbol_id: z.string().describe("Symbol ID (e.g. 'src/file.ts::functionName')"),
+    direction: z.enum(["callers", "callees", "both"]).optional().default("both").describe("Direction to traverse"),
+    depth: z.number().optional().default(1).describe("Traversal depth"),
+    verbosity: verbositySchema,
+  },
+  async ({ symbol_id, direction, depth, verbosity }) => {
+    const result = await getCallGraphHandler(ctx, symbol_id, direction, depth, verbosity as Verbosity);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "get_hierarchy",
+  "Get class/interface inheritance hierarchy — extends, implements, extendedBy, implementedBy",
+  {
+    symbol_id: z.string().describe("Symbol ID (e.g. 'src/file.ts::ClassName')"),
+    verbosity: verbositySchema,
+  },
+  async ({ symbol_id, verbosity }) => {
+    const result = await getHierarchyHandler(ctx, symbol_id, verbosity as Verbosity);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 );

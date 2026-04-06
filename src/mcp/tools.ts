@@ -9,7 +9,8 @@ import { GitAnalyzer } from "../temporal/git-analyzer.js";
 import { computeOwnership } from "../knowledge/ownership.js";
 import { computeBusFactor } from "../knowledge/bus-factor.js";
 import { detectClones } from "../analysis/clone-detection.js";
-import type { CodeGraphConfig, Verbosity } from "../types.js";
+import { TsAnalyzer } from "../type-resolver/ts-analyzer.js";
+import type { CodeGraphConfig, Verbosity, TypeAnalyzer } from "../types.js";
 import { shapeResponse, truncateList, DEFAULT_VERBOSITY } from "./verbosity.js";
 
 export interface ToolContext {
@@ -18,6 +19,7 @@ export interface ToolContext {
   repoRoot: string;
   lastBuild: BuildResult | null;
   semanticIndex: SemanticIndex;
+  typeAnalyzer: TypeAnalyzer | null;
 }
 
 export function createToolContext(config: CodeGraphConfig, repoRoot: string): ToolContext {
@@ -27,7 +29,18 @@ export function createToolContext(config: CodeGraphConfig, repoRoot: string): To
     repoRoot,
     lastBuild: null,
     semanticIndex: new SemanticIndex(config.embeddingModel),
+    typeAnalyzer: null,
   };
+}
+
+async function ensureTypeAnalyzer(ctx: ToolContext): Promise<TypeAnalyzer> {
+  if (!ctx.typeAnalyzer) {
+    const analyzer = new TsAnalyzer();
+    const { join } = require("path") as typeof import("path");
+    await analyzer.init(join(ctx.repoRoot, ctx.config.tsconfigPath));
+    ctx.typeAnalyzer = analyzer;
+  }
+  return ctx.typeAnalyzer;
 }
 
 export async function buildGraph(ctx: ToolContext): Promise<{
@@ -693,4 +706,66 @@ export async function detectClonesHandler(ctx: ToolContext, minLoc: number = 5, 
     totalClonedLines: report.totalClonedLines,
     cloneRatio: report.cloneRatio,
   };
+}
+
+// --- Type Resolution Handlers ---
+
+export async function resolveTypeHandler(ctx: ToolContext, symbolId: string, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const analyzer = await ensureTypeAnalyzer(ctx);
+  const parts = symbolId.split("::");
+  const filePath = parts[0];
+  const symbolName = parts.slice(1).join("::") || "";
+
+  if (symbolName) {
+    const typeInfo = await analyzer.getTypeInfo(symbolId);
+    const resolution = await analyzer.resolveSymbol(symbolName, filePath);
+    return {
+      symbol: symbolId,
+      type: typeInfo,
+      definition: {
+        filePath: resolution.filePath,
+        line: resolution.line,
+        typeSignature: resolution.typeSignature,
+      },
+      references: truncateList(resolution.references, verbosity, 20, 5),
+      totalReferences: resolution.references.length,
+    };
+  }
+
+  // File-level: return all type info for symbols in the file
+  const fileSymbols: Array<{ name: string; typeSignature: string; isAny: boolean }> = [];
+  ctx.store.forEachNode((id, attrs) => {
+    if (attrs.filePath === filePath && attrs.kind !== "file") {
+      fileSymbols.push({ name: attrs.name, typeSignature: "", isAny: false });
+    }
+  });
+
+  for (const sym of fileSymbols) {
+    const info = await analyzer.getTypeInfo(`${filePath}::${sym.name}`);
+    sym.typeSignature = info.typeString;
+    sym.isAny = info.isAny;
+  }
+
+  return {
+    file: filePath,
+    symbols: truncateList(fileSymbols, verbosity),
+    anyCount: fileSymbols.filter(s => s.isAny).length,
+  };
+}
+
+export async function getCallGraphHandler(ctx: ToolContext, symbolId: string, direction: "callers" | "callees" | "both" = "both", depth: number = 1, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const analyzer = await ensureTypeAnalyzer(ctx);
+  const result = await analyzer.getCallGraph(symbolId, direction, depth);
+  return {
+    root: result.root,
+    edges: truncateList(result.edges, verbosity, 50, 10),
+    totalEdges: result.edges.length,
+    direction,
+  };
+}
+
+export async function getHierarchyHandler(ctx: ToolContext, symbolId: string, verbosity: Verbosity = DEFAULT_VERBOSITY) {
+  const analyzer = await ensureTypeAnalyzer(ctx);
+  const result = await analyzer.getHierarchy(symbolId);
+  return result;
 }
