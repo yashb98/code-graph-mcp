@@ -123,4 +123,4 @@ Add to your MCP settings:
 
 ## Test Coverage
 
-198 tests | 95.1% line coverage | 94.1% function coverage
+212 tests | 92.7% line coverage | 91.9% function coverage
