@@ -207,11 +207,18 @@ export function findOrphansHandler(ctx: ToolContext, verbosity: Verbosity = DEFA
 }
 
 export function healthReportHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
-  return computeHealthReport(ctx.store, {
+  const report = computeHealthReport(ctx.store, {
     entryPoints: new Set(ctx.config.entryPoints),
     maxCallChainDepth: ctx.config.maxCallChainDepth,
     hubDegreeMultiplier: ctx.config.hubDegreeMultiplier,
   });
+  return shapeResponse(report as unknown as Record<string, unknown>, verbosity, {
+    alwaysInclude: ["score", "grade", "overall"],
+    minimalStrip: ["issues"],
+    detailedOnly: [],
+    normalArrayLimit: 20,
+    minimalArrayLimit: 0,
+  }) as typeof report;
 }
 
 export function checkArchitectureRulesHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
@@ -340,11 +347,11 @@ export async function getChangeRiskHandler(ctx: ToolContext, filePath: string, v
 
   const risk = riskScore >= 70 ? "high" : riskScore >= 40 ? "medium" : "low";
 
-  return {
+  return shapeResponse({
     filePath,
     riskScore,
     risk,
-    signals: {
+    signals: verbosity === "minimal" ? undefined : {
       churn: fileChurn ?? null,
       dependentCount: dependents.length,
       dependencyCount: dependencies.length,
@@ -356,7 +363,9 @@ export async function getChangeRiskHandler(ctx: ToolContext, filePath: string, v
         knowledgeScore: ownership.knowledgeScore,
       } : null,
     },
-  };
+  } as Record<string, unknown>, verbosity, {
+    alwaysInclude: ["filePath", "riskScore", "risk"],
+  }) as { filePath: string; riskScore: number; risk: string; signals?: unknown };
 }
 
 // --- Advanced Tool Handlers ---
@@ -447,7 +456,13 @@ export function findCodeSmellsHandler(ctx: ToolContext, verbosity: Verbosity = D
     });
   }
 
-  return { smells: truncateList(smells, verbosity, 30, 5), count: smells.length };
+  return shapeResponse({
+    smells: truncateList(smells, verbosity, 30, 5),
+    count: smells.length,
+  }, verbosity, {
+    alwaysInclude: ["count"],
+    minimalStrip: ["smells"],
+  });
 }
 
 export function getArchitectureOverviewHandler(ctx: ToolContext, verbosity: Verbosity = DEFAULT_VERBOSITY) {
@@ -472,18 +487,22 @@ export function getArchitectureOverviewHandler(ctx: ToolContext, verbosity: Verb
     hasMore: files.length > 10,
   }));
 
-  return {
+  return shapeResponse({
     stats,
     communities: {
       count: communities.count,
       modularity: Math.round(communities.modularity * 1000) / 1000,
-      details: communitySummaries,
+      details: truncateList(communitySummaries, verbosity, 20, 5),
     },
-    cycles: { count: cycles.length, cycles: cycles.slice(0, 5) },
+    cycles: { count: cycles.length, cycles: truncateList(cycles, verbosity, 5, 0) },
     components: { count: components.length },
-    hubs,
+    hubs: truncateList(hubs, verbosity, 10, 3),
     entryPoints: ctx.config.entryPoints,
-  };
+  }, verbosity, {
+    alwaysInclude: ["stats", "communities"],
+    minimalStrip: ["hubs", "entryPoints"],
+    detailedOnly: [],
+  });
 }
 
 export function getCommunityHandler(ctx: ToolContext, communityId: number, verbosity: Verbosity = DEFAULT_VERBOSITY) {
@@ -536,7 +555,7 @@ export function getReviewContextHandler(ctx: ToolContext, filePaths: string[], v
       }
     });
 
-    return {
+    return shapeResponse({
       filePath,
       exists: !!node,
       loc: node?.loc ?? 0,
@@ -544,8 +563,13 @@ export function getReviewContextHandler(ctx: ToolContext, filePaths: string[], v
       dependencies: truncateList(deps, verbosity),
       dependents: truncateList(dependents, verbosity),
       impactRadius: dependents.length,
-      ...(verbosity === "minimal" ? {} : {}),
-    };
+      dependencyCount: deps.length,
+      dependentCount: dependents.length,
+      symbolCount: symbols.length,
+    }, verbosity, {
+      alwaysInclude: ["filePath", "exists", "impactRadius"],
+      minimalStrip: ["symbols", "dependencies", "dependents"],
+    });
   });
 
   return { files: context, totalImpactRadius: context.reduce((sum, c) => sum + c.impactRadius, 0) };
@@ -873,7 +897,7 @@ export async function getSymbolInfoHandler(ctx: ToolContext, symbolId: string, v
     }
   }
 
-  return {
+  return shapeResponse({
     symbol: symbolId,
     exists: !!node,
     kind: node?.kind ?? "unknown",
@@ -895,7 +919,11 @@ export async function getSymbolInfoHandler(ctx: ToolContext, symbolId: string, v
       knowledgeScore: ownership.knowledgeScore,
       isSilo: ownership.isSilo,
     } : null,
-  };
+  }, verbosity, {
+    alwaysInclude: ["symbol", "exists", "kind", "name", "dependencyCount", "dependentCount"],
+    minimalStrip: ["dependencies", "dependents", "churn", "ownership"],
+    detailedOnly: [],
+  });
 }
 
 /**

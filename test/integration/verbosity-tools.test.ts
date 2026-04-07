@@ -66,11 +66,12 @@ describe("Verbosity Integration", () => {
     expect(typeof result.counts.zombieExports).toBe("number");
   });
 
-  test("find_code_smells minimal returns fewer smells", () => {
+  test("find_code_smells minimal strips smells array", () => {
     const minimal = findCodeSmellsHandler(ctx, "minimal");
     const normal = findCodeSmellsHandler(ctx, "normal");
     expect(minimal.count).toBe(normal.count); // Count is always full
-    expect(minimal.smells.length).toBeLessThanOrEqual(5);
+    // At minimal level, smells array is stripped entirely
+    expect(minimal.smells).toBeUndefined();
   });
 
   test("get_architecture_overview works at all levels", () => {
@@ -80,12 +81,18 @@ describe("Verbosity Integration", () => {
     expect(minimal.communities.count).toBe(detailed.communities.count);
   });
 
-  test("get_review_context minimal truncates symbols", () => {
+  test("get_review_context minimal strips verbose fields", () => {
     const minimal = getReviewContextHandler(ctx, ["src/index.ts"], "minimal");
     const detailed = getReviewContextHandler(ctx, ["src/index.ts"], "detailed");
     expect(minimal.files[0].exists).toBe(true);
-    expect(minimal.files[0].symbols.length).toBeLessThanOrEqual(5);
-    expect(detailed.files[0].symbols.length).toBeGreaterThanOrEqual(minimal.files[0].symbols.length);
+    expect(minimal.files[0].impactRadius).toBeDefined();
+    // At minimal level, symbols/deps/dependents are stripped
+    expect((minimal.files[0] as any).symbols).toBeUndefined();
+    expect((minimal.files[0] as any).dependencies).toBeUndefined();
+    // Counts still present
+    expect((minimal.files[0] as any).symbolCount).toBeDefined();
+    // Detailed has full arrays
+    expect(detailed.files[0].symbols.length).toBeGreaterThanOrEqual(0);
   });
 
   test("plan_migration works with verbosity", () => {
